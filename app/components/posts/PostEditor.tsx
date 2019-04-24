@@ -9,7 +9,7 @@ import { Mention, MentionsInput } from 'react-mentions';
 
 import env from '../../lib/env';
 
-import getRootUrl from '../../lib/api/getRootUrl';
+// import getRootUrl from '../../lib/api/getRootUrl';
 import {
   getSignedRequestForUpload,
   uploadFileUsingSignedPutRequest,
@@ -42,6 +42,9 @@ type MyProps = {
   onChanged: (content) => void;
   content: string;
   members: User[];
+  textareaHeight?: string;
+  readOnly?: boolean;
+  placeholder?: string;
 };
 
 type MyState = {
@@ -49,9 +52,17 @@ type MyState = {
 };
 
 class PostEditor extends React.Component<MyProps, MyState> {
-  public state = {
-    htmlContent: '',
-  };
+  private textAreaRef;
+
+  constructor(props) {
+    super(props);
+
+    this.state = {
+      htmlContent: '',
+    };
+
+    this.textAreaRef = React.createRef();
+  }
 
   public render() {
     const { htmlContent } = this.state;
@@ -59,6 +70,9 @@ class PostEditor extends React.Component<MyProps, MyState> {
     const { currentUser } = store;
 
     const membersMinusCurrentUser = members.filter(member => member._id !== currentUser._id);
+
+    const isThemeDark = store && store.currentUser && store.currentUser.darkTheme === true;
+    const textareaBackgroundColor = isThemeDark ? '#303030' : '#fff';
 
     return (
       <div style={{ marginTop: '20px' }}>
@@ -88,7 +102,11 @@ class PostEditor extends React.Component<MyProps, MyState> {
             id="upload-file"
             type="file"
             style={{ display: 'none' }}
-            onChange={this.uploadFile}
+            onChange={event => {
+              const file = event.target.files[0];
+              event.target.value = '';
+              this.uploadFile(file);
+            }}
           />
           <label htmlFor="upload-file">
             <Button color="primary" component="span">
@@ -104,8 +122,9 @@ class PostEditor extends React.Component<MyProps, MyState> {
             width: '100%',
             height: '100%',
             padding: '10px 15px',
-            border: '1px solid rgba(255, 255, 255, 0.5)',
-            overflow: 'auto',
+            border: isThemeDark
+              ? '1px solid rgba(255, 255, 255, 0.5)'
+              : '1px solid rgba(0, 0, 0, 0.5)',
           }}
         >
           {htmlContent ? (
@@ -117,10 +136,11 @@ class PostEditor extends React.Component<MyProps, MyState> {
                   border: 'none',
                   outline: 'none',
                   font: '16px Roboto',
-                  color: '#fff',
+                  color: isThemeDark ? '#fff' : '#000',
                   fontWeight: 300,
                   height: '100vh', // TODO: check on Mobile
                   lineHeight: '1.5em',
+                  backgroundColor: content ? textareaBackgroundColor : 'transparent',
                 },
                 suggestions: {
                   list: {
@@ -140,9 +160,15 @@ class PostEditor extends React.Component<MyProps, MyState> {
               }}
               autoFocus
               value={content}
-              placeholder="Compose new post"
-              markup={'`@__display__` '}
-              displayTransform={display => `\`@${display}\` `}
+              placeholder={this.props.placeholder ? this.props.placeholder : 'Compose new post'}
+              markup={'[`__type__#__display__`](__id__)'}
+              displayTransform={(id, display, type) => {
+                if (type === '@') {
+                  return `@${display}`;
+                }
+
+                return `[${display} ](${id})`;
+              }}
               onChange={event => {
                 this.props.onChanged(event.target.value);
               }}
@@ -213,29 +239,26 @@ class PostEditor extends React.Component<MyProps, MyState> {
     this.setState({ htmlContent });
   };
 
-  public uploadFile = async () => {
-    const { content } = this.props;
-    const { store } = this.props;
-    const { currentTeam } = store;
-
-    const fileElm = document.getElementById('upload-file') as HTMLFormElement;
-    const file = fileElm.files[0];
-
-    if (file == null) {
-      notify('No file selected for upload.');
+  private uploadFile = async (file: File) => {
+    if (!file) {
+      notify('No file selected.');
       return;
     }
 
+    if (!file.type || (!file.type.startsWith('image/') && file.type !== 'application/pdf')) {
+      notify('Wrong file.');
+      return;
+    }
+
+    const { store } = this.props;
+    const { currentTeam } = store;
+
     NProgress.start();
 
-    fileElm.value = '';
-
     const { BUCKET_FOR_POSTS } = env;
+
     const bucket = BUCKET_FOR_POSTS;
-
     const prefix = `${currentTeam.slug}`;
-
-    const { width, height } = await getImageDimension(file);
 
     try {
       const responseFromApiServerForUpload = await getSignedRequestForUpload({
@@ -244,38 +267,46 @@ class PostEditor extends React.Component<MyProps, MyState> {
         bucket,
       });
 
-      const resizedFile = await resizeImage(file, 1024, 1024);
+      let markdown;
 
-      await uploadFileUsingSignedPutRequest(
-        resizedFile,
-        responseFromApiServerForUpload.signedRequest,
-      );
+      if (file.type.startsWith('image/')) {
+        const { width } = await getImageDimension(file);
+        const resizedFile = await resizeImage(file, 1024, 1024);
 
-      const imgSrc = `${getRootUrl()}/uploaded-file?teamSlug=${
-        currentTeam.slug
-      }&bucket=${bucket}&path=${responseFromApiServerForUpload.path}`;
+        await uploadFileUsingSignedPutRequest(
+          resizedFile,
+          responseFromApiServerForUpload.signedRequest,
+        );
 
-      const finalWidth = width > 768 ? '100%' : width;
+        const imgSrc = responseFromApiServerForUpload.url;
 
-      const markdownImage = `<details class="lazy-load-image">
-        <summary>Click to see <b>${file.name}</b></summary>
-        <div class="lazy-load-image-body">
-          <img
-            width="${finalWidth}"
-            data-width="${finalWidth}"
-            data-height="${height}"
-            data-src="${imgSrc}"
-            alt="Async"
-            class="s3-image"
-            style="display: none;"
-          />
-        </div>
-      </details>`;
+        const finalWidth = width > 768 ? '100%' : `${width}px`;
 
-      this.props.onChanged(content.concat('\n', markdownImage.replace(/\s+/g, ' ')));
+        markdown = `
+        <div>
+          <img style="max-width: ${finalWidth}; width:100%" src="${imgSrc}" alt="Async" class="s3-image" />
+        </div>`;
+      } else if (file.type === 'application/pdf') {
+        await uploadFileUsingSignedPutRequest(file, responseFromApiServerForUpload.signedRequest);
+
+        const fileUrl = responseFromApiServerForUpload.url;
+
+        markdown = `[${file.name}](${fileUrl})`;
+      }
+
+      const editor = this.textAreaRef && this.textAreaRef.current;
+      if (editor) {
+        const startPos = editor.selectionStart;
+        editor.value = `${editor.value.substring(0, startPos)}\n${markdown.replace(
+          /\s+/g,
+          ' ',
+        )}${editor.value.substring(startPos, editor.value.length)}`;
+
+        this.props.onChanged(editor.value);
+      }
 
       // TODO: delete image if image is added but Post is not saved
-      // TODO: see more on Github's issue
+      //       see more on Github's issue
       NProgress.done();
       notify('You successfully uploaded file.');
     } catch (error) {

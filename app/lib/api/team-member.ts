@@ -1,5 +1,9 @@
 import sendRequestAndGetResponse from './sendRequestAndGetResponse';
 
+import env from '../env';
+
+const { LAMBDA_API_ENDPOINT } = env;
+
 const BASE_PATH = '/api/v1/team-member';
 
 export const getInitialData = (options: any = {}) =>
@@ -90,5 +94,16 @@ export const uploadFileUsingSignedPutRequest = (file, signedRequest, headers = {
 
 export const updateProfile = data =>
   sendRequestAndGetResponse(`${BASE_PATH}/user/update-profile`, {
+    body: JSON.stringify(data),
+  });
+
+export const toggleTheme = data =>
+  sendRequestAndGetResponse(`${BASE_PATH}/user/toggle-theme`, {
+    body: JSON.stringify(data),
+  });
+
+export const sendDataToLambda = data =>
+  sendRequestAndGetResponse(`${LAMBDA_API_ENDPOINT}/`, {
+    externalServer: true,
     body: JSON.stringify(data),
   });

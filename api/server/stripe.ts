@@ -60,7 +60,7 @@ function updateCustomer({ customerId, newCardId }) {
 }
 
 function verifyWebHook(request) {
-  const event = stripeInstance.webhooks.constructEvent<any>(
+  const event = stripeInstance.webhooks.constructEvent(
     request.body,
     request.headers['stripe-signature'],
     ENDPOINT_SECRET,
@@ -75,9 +75,11 @@ function stripeWebHooks({ server }) {
     async (req, res, next) => {
       try {
         const event = await verifyWebHook(req);
-        logger.info(event.id);
-        const { subscription } = event.data.object;
-        logger.info(JSON.stringify(subscription));
+        // logger.info(JSON.stringify(event.data.object));
+        // @ts-ignore
+        // some problem with @types/stripe ?
+        const { subscription} = event.data.object;
+        // logger.info(JSON.stringify(subscription));
         await Team.cancelSubscriptionAfterFailedPayment({
           subscriptionId: JSON.stringify(subscription),
         });

@@ -1,7 +1,13 @@
 import { action, decorate, IObservableArray, observable, runInAction } from 'mobx';
 import NProgress from 'nprogress';
 
-import { addPost, deletePost, editDiscussion, getPostList } from '../api/team-member';
+import {
+  addPost,
+  deletePost,
+  editDiscussion,
+  getPostList,
+  sendDataToLambda,
+} from '../api/team-member';
 import { Post, Store, Team } from './index';
 
 class Discussion {
@@ -16,6 +22,7 @@ class Discussion {
   public posts: IObservableArray<Post> = observable([]);
 
   public isLoadingPosts = false;
+  public notificationType: string;
 
   constructor(params) {
     this._id = params._id;
@@ -26,6 +33,7 @@ class Discussion {
     this.name = params.name;
     this.slug = params.slug;
     this.memberIds.replace(params.memberIds || []);
+    this.notificationType = params.notificationType;
 
     if (params.initialPosts) {
       this.setInitialPosts(params.initialPosts);
@@ -38,8 +46,7 @@ class Discussion {
 
   public setInitialPosts(posts) {
     const postObjs = posts.map(t => new Post({ discussion: this, store: this.store, ...t }));
-
-    this.posts.replace(postObjs);
+    this.posts.replace(postObjs.filter(p => p.createdUserId === this.store.currentUser._id));
   }
 
   public async loadPosts() {
@@ -55,11 +62,8 @@ class Discussion {
 
       runInAction(() => {
         const postObjs = posts.map(t => new Post({ discussion: this, store: this.store, ...t }));
-        this.posts.replace(postObjs);
+        this.posts.replace(postObjs.filter(p => p.createdUserId === this.store.currentUser._id));
       });
-    } catch (error) {
-      console.error(error);
-      throw error;
     } finally {
       runInAction(() => {
         this.isLoadingPosts = false;
@@ -73,6 +77,7 @@ class Discussion {
 
     this.name = data.name;
     this.memberIds.replace(data.memberIds || []);
+    this.notificationType = data.notificationType;
   }
 
   public async edit(data) {
@@ -92,13 +97,27 @@ class Discussion {
   }
 
   public addPostToLocalCache(data) {
+    const oldPost = this.posts.find(t => t._id === data._id);
+    if (oldPost) {
+      this.posts.remove(oldPost);
+    }
+
     const postObj = new Post({ discussion: this, store: this.store, ...data });
+
+    if (postObj.createdUserId !== this.store.currentUser._id) {
+      return;
+    }
+
     this.posts.push(postObj);
+
+    return postObj;
   }
 
   public editPostFromLocalCache(data) {
-    const post = this.posts.find(t => t._id === data.id);
-    post.changeLocalCache(data);
+    const post = this.posts.find(t => t._id === data._id);
+    if (post) {
+      post.changeLocalCache(data);
+    }
   }
 
   public removePostFromLocalCache(postId) {
@@ -106,14 +125,17 @@ class Discussion {
     this.posts.remove(post);
   }
 
-  public async addPost(content: string) {
+  public async addPost(content: string): Promise<Post> {
     const { post } = await addPost({
       discussionId: this._id,
       content,
     });
 
-    runInAction(() => {
-      this.addPostToLocalCache(post);
+    return new Promise<Post>(resolve => {
+      runInAction(() => {
+        const obj = this.addPostToLocalCache(post);
+        resolve(obj);
+      });
     });
   }
 
@@ -127,6 +149,21 @@ class Discussion {
       this.posts.remove(post);
     });
   }
+
+  public async sendDataToLambdaApiMethod({ discussionName, postContent, authorName, userIds }) {
+    console.log(discussionName, authorName, postContent, userIds);
+    try {
+      await sendDataToLambda({
+        discussionName,
+        postContent,
+        authorName,
+        userIds,
+      });
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
+  }
 }
 
 decorate(Discussion, {
@@ -135,6 +172,7 @@ decorate(Discussion, {
   memberIds: observable,
   posts: observable,
   isLoadingPosts: observable,
+  notificationType: observable,
 
   setInitialPosts: action,
   loadPosts: action,

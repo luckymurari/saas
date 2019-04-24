@@ -105,13 +105,14 @@ router.get('/teams', async (req, res, next) => {
 
 router.post('/discussions/add', async (req, res, next) => {
   try {
-    const { name, teamId, memberIds = [] } = req.body;
+    const { name, teamId, memberIds = [], notificationType } = req.body;
 
     const discussion = await Discussion.add({
       userId: req.user.id,
       name,
       teamId,
       memberIds,
+      notificationType,
     });
 
     res.json({ discussion });
@@ -122,13 +123,14 @@ router.post('/discussions/add', async (req, res, next) => {
 
 router.post('/discussions/edit', async (req, res, next) => {
   try {
-    const { name, id, memberIds = [] } = req.body;
+    const { name, id, memberIds = [], notificationType } = req.body;
 
     await Discussion.edit({
       userId: req.user.id,
       name,
       id,
       memberIds,
+      notificationType,
     });
 
     res.json({ done: 1 });
@@ -246,6 +248,18 @@ router.post('/user/update-profile', async (req, res, next) => {
     });
 
     res.json({ updatedUser });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/user/toggle-theme', async (req, res, next) => {
+  try {
+    const { darkTheme } = req.body;
+
+    await User.toggleTheme({ userId: req.user.id, darkTheme });
+
+    res.json({ done: 1 });
   } catch (err) {
     next(err);
   }
